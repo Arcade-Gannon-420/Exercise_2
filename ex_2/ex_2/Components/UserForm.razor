@@ -1,0 +1,120 @@
+﻿@using System.ComponentModel.DataAnnotations
+@using ex_2.Model
+
+<h3>@(IsEditMode ? "Edit User" : "Create User")</h3>
+
+<EditForm Model="@_draft" OnValidSubmit="Save">
+    <DataAnnotationsValidator />
+    
+    <div class="form-field">
+        <label for="user-name">Name</label>
+        <InputText id="user-name" @bind-Value="_draft.Name" />
+        <ValidationMessage For="@(() => _draft.Name)" />
+    </div>
+
+    <div class="form-field">
+        <label for="user-address">Address</label>
+        <InputText id="user-address" @bind-Value="_draft.Address" />
+    </div>
+
+    <div class="form-field">
+        <label for="user-age">Age</label>
+        <InputNumber id="user-age" @bind-Value="_draft.Age" />
+        <ValidationMessage For="@(() => _draft.Age)" />
+    </div>
+
+    <div class="form-field">
+        <label for="user-email">Email</label>
+        <input id="user-email"
+               type="text"
+               value="@_draft.Email"
+               @onchange="OnEmailChanged" />
+        <ValidationMessage For="@(() => _draft.Email)" />
+        @if (_emailError != null)
+        {
+            <p class="validation-message">@_emailError</p>
+        }
+    </div>
+
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary" disabled="@_isSaving">
+            @(_isSaving ? "Saving..." : ButtonText)
+        </button>
+
+        <button type="button" class="btn btn-secondary" @onclick="Clear">Clear</button>
+
+        <button type="button" class="btn btn-secondary"
+                @onclick="() => OnViewUsers.InvokeAsync()">
+            View Saved Users (@UserCount)
+        </button>
+    </div>
+
+    @* <ValidationSummary /> *@
+</EditForm>
+
+@code {
+    [Parameter] public UserModel User { get; set; } = new();
+    [Parameter] public bool IsEditMode { get; set; } = false;
+    [Parameter] public string ButtonText { get; set; } = "Save";
+    [Parameter] public EventCallback<UserModel> OnSaved { get; set; }
+    [Parameter] public EventCallback OnCleared { get; set; }
+    [Parameter] public EventCallback OnViewUsers { get; set; }
+    [Parameter] public int UserCount { get; set; }
+    [Parameter] public Func<string?, Task<bool>>? CheckEmailTaken { get; set; }
+
+    private UserModel _draft = new();
+    private bool _isSaving = false;
+    private string? _emailError = null;
+
+    protected override void OnParametersSet()
+    {
+        _draft = new UserModel
+        {
+            UserID = User.UserID,
+            Name = User.Name,
+            Address = User.Address,
+            Age = User.Age,
+            Email = User.Email
+        };
+    }
+
+    private async Task OnEmailChanged(ChangeEventArgs e)
+    {
+        _draft.Email = e.Value?.ToString();
+        await ValidateEmail();
+    }
+
+    private async Task ValidateEmail()
+    {
+        if (CheckEmailTaken is null) return;
+        var taken = await CheckEmailTaken(_draft.Email);
+        _emailError = taken ? "Email is already in use." : null;
+    }
+
+    private async Task Save()
+    {
+        await ValidateEmail();
+        if (_emailError != null) return;
+
+        _isSaving = true;
+
+        var submission = new UserModel
+        {
+            UserID = _draft.UserID,
+            Name = _draft.Name,
+            Address = _draft.Address,
+            Age = _draft.Age,
+            Email = _draft.Email?.Trim().ToLower()
+        };
+
+        await OnSaved.InvokeAsync(submission);
+        _isSaving = false;
+    }
+
+    private void Clear()
+    {
+        _draft = new UserModel();
+        _emailError = null;
+        OnCleared.InvokeAsync();
+    }
+}

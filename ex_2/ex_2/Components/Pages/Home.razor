@@ -1,0 +1,227 @@
+﻿@page "/"
+@rendermode InteractiveServer
+@using ex_2.Model
+@using ex_2.Services
+@using ex_2.Components
+@inject UserServices Store
+
+<div class="page-center">
+
+    @if (!_showDebug)
+    {
+        <div class="form-panel">
+            <UserForm User="@_formUser"
+                      IsEditMode="@_isEditMode"
+                      ButtonText="@(_isEditMode ? "Update" : "Save")"
+                      OnSaved="HandleSaved"
+                      OnCleared="HandleCleared"
+                      OnViewUsers="ToggleDebug"
+                      UserCount="@Store.Users.Count"
+                      CheckEmailTaken="CheckEmailTaken" />
+
+            @if (!string.IsNullOrWhiteSpace(_message))
+            {
+                <p class="form-message @_messageClass">@_message</p>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="table-panel">
+            <div class="panel-header">
+                <h3>Saved Users (@Store.Users.Count)</h3>
+            </div>
+
+            <div class="table-wrap">
+                <table class="debug-table">
+                    <colgroup>
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                        <col />
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>User ID</th>
+                            <th>Name</th>
+                            <th>Address</th>
+                            <th>Age</th>
+                            <th>Email</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (!Store.Users.Any())
+                        {
+                            <tr>
+                                <td colspan="6" class="empty-row">No users saved yet.</td>
+                            </tr>
+                        }
+                        else
+                        {
+                            @foreach (var user in Store.Users)
+                            {
+                                @if (_editingUserId == user.UserID)
+                                {
+                                    <tr class="editing">
+                                        <td><span class="badge-id">#@user.UserID</span></td>
+                                        <td>
+                                            <input class="inline-input" type="text" value="@_editDraft.Name"
+                                                   @onchange="@(e => _editDraft.Name = e.Value?.ToString() ?? "")" />
+                                        </td>
+                                        <td>
+                                            <input class="inline-input" type="text" value="@_editDraft.Address"
+                                                   @onchange="@(e => _editDraft.Address = e.Value?.ToString())" />
+                                        </td>
+                                        <td>
+                                            <input class="inline-input" type="number" value="@_editDraft.Age"
+                                                   @onchange="@(e => _editDraft.Age = int.TryParse(e.Value?.ToString(), out var a) ? a : _editDraft.Age)" />
+                                        </td>
+                                        <td>
+                                            <input class="inline-input" type="text" value="@_editDraft.Email"
+                                                   @onchange="OnInlineEmailChanged" />
+                                            @if (_inlineEmailTakenError)
+                                            {
+                                                <span class="inline-error">Email already in use.</span>
+                                            }
+                                        </td>
+                                        <td style="white-space:nowrap">
+                                            <button class="btn-inline-save" @onclick="CommitInlineEdit">Save</button>
+                                            <button class="btn-inline-cancel" @onclick="CancelInlineEdit">Cancel</button>
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    <tr>
+                                        <td><span class="badge-id">#@user.UserID</span></td>
+                                        <td>@user.Name</td>
+                                        <td>@(user.Address ?? "—")</td>
+                                        <td>@user.Age</td>
+                                        <td>@user.Email</td>
+                                        <td>
+                                            <button class="btn-edit" @onclick="@(() => BeginInlineEdit(user))">Edit</button>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="panel-footer">
+                <button class="btn btn-secondary" @onclick="ClearStore">Clear Store</button>
+                <button class="btn btn-secondary" @onclick="ToggleDebug">Exit</button>
+            </div>
+        </div>
+    }
+
+</div>
+
+@code {
+    private UserModel _formUser = new();
+    private bool _isEditMode = false;
+    private bool _showDebug = false;
+    private string _message = "";
+    private string _messageClass = "";
+
+    private int? _editingUserId = null;
+    private UserModel _editDraft = new();
+    private bool _inlineEmailTakenError = false;
+
+    private Task<bool> CheckEmailTaken(string? email)
+    {
+        var taken = Store.Users.Any(u =>
+            u.UserID != _formUser.UserID &&
+            u.Email == email?.Trim().ToLower());
+        return Task.FromResult(taken);
+    }
+
+    private void HandleSaved(UserModel submission)
+    {
+        if (_isEditMode)
+            Store.Update(submission);
+        else
+        {
+            submission.UserID = Store.NextId();
+            Store.Add(submission);
+        }
+
+        SetMessage($"{(_isEditMode ? "Updated" : "Saved")}: {submission.Name} (total: {Store.Users.Count})", isError: false);
+        _isEditMode = false;
+        _formUser = new UserModel();
+    }
+
+    private void HandleCleared()
+    {
+        _isEditMode = false;
+        _formUser = new UserModel();
+        SetMessage("Cleared", isError: false);
+    }
+
+    private void BeginInlineEdit(UserModel user)
+    {
+        _editingUserId = user.UserID;
+        _inlineEmailTakenError = false;
+        _editDraft = new UserModel
+        {
+            UserID = user.UserID,
+            Name = user.Name,
+            Address = user.Address,
+            Age = user.Age,
+            Email = user.Email
+        };
+    }
+
+    private async Task OnInlineEmailChanged(ChangeEventArgs e)
+    {
+        _editDraft.Email = e.Value?.ToString();
+        var takenByOther = Store.Users.Any(u =>
+            u.UserID != _editDraft.UserID &&
+            u.Email == _editDraft.Email?.Trim().ToLower());
+        _inlineEmailTakenError = await Task.FromResult(takenByOther);
+    }
+
+    private void CommitInlineEdit()
+    {
+        if (_inlineEmailTakenError) return;
+
+        var committed = new UserModel
+        {
+            UserID = _editDraft.UserID,
+            Name = _editDraft.Name,
+            Address = _editDraft.Address,
+            Age = _editDraft.Age,
+            Email = _editDraft.Email?.Trim().ToLower()
+        };
+
+        Store.Update(committed);
+        SetMessage($"Updated: {committed.Name}", isError: false);
+        CancelInlineEdit();
+    }
+
+    private void CancelInlineEdit()
+    {
+        _editingUserId = null;
+        _editDraft = new UserModel();
+        _inlineEmailTakenError = false;
+    }
+
+    private void ClearStore()
+    {
+        Store.Clear();
+        CancelInlineEdit();
+        SetMessage("Store cleared.", isError: false);
+    }
+
+    private void ToggleDebug() => _showDebug = !_showDebug;
+
+    private void SetMessage(string text, bool isError)
+    {
+        _message = text;
+        _messageClass = isError ? "form-message--error" : "form-message--success";
+    }
+}
